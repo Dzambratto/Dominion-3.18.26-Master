@@ -9,6 +9,7 @@ interface InboxViewProps {
   onViewPolicy: (id: string) => void;
   onViewContract: (id: string) => void;
   onUpload?: () => void;
+  onConnectEmail?: () => void;
 }
 
 const PRIORITY_CONFIG = {
@@ -17,7 +18,7 @@ const PRIORITY_CONFIG = {
   info:   { color: '#3B82F6', bg: '#EFF6FF', border: '#BFDBFE', label: 'INFO' },
 };
 
-export function InboxView({ onViewInvoice, onViewPolicy, onViewContract, onUpload }: InboxViewProps) {
+export function InboxView({ onViewInvoice, onViewPolicy, onViewContract, onUpload, onConnectEmail }: InboxViewProps) {
   const { state, dismissAlert, triggerScan } = useAppStore();
   const s = state.summary;
 
@@ -94,9 +95,12 @@ export function InboxView({ onViewInvoice, onViewPolicy, onViewContract, onUploa
                 ↑ Upload a Document
               </button>
             )}
-            <div className="px-5 py-3 rounded-xl text-sm font-medium text-[#64748B] bg-[#F1F5F9] border border-[#E2E8F0]">
-              📧 Connect Email (in Settings)
-            </div>
+            <button
+              onClick={onConnectEmail}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-[#0F172A] bg-[#F1F5F9] border border-[#E2E8F0] hover:bg-[#E2E8F0] transition-colors"
+            >
+              📧 Connect Email
+            </button>
           </div>
           <div className="mt-8 grid grid-cols-3 gap-4 max-w-lg">
             {[

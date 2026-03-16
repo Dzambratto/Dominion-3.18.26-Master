@@ -17,10 +17,14 @@ import IntelligenceView from './views/IntelligenceView';
 import { UploadModal } from './UploadModal';
 import type { UploadDocType } from './UploadModal';
 
+const APP_URL = (import.meta as { env: Record<string, string> }).env.VITE_APP_URL || 'https://getdominiontech.com';
+const isLocalDev = APP_URL.includes('localhost') || APP_URL.includes('127.0.0.1');
+
 export type ViewId = 'inbox' | 'invoices' | 'contracts' | 'insurance' | 'orders' | 'payments' | 'intelligence' | 'settings';
 
 export function DashboardShell() {
   const { state } = useAppStore();
+  const { user } = useAuth();
   const [activeView, setActiveView] = useState<ViewId>('inbox');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [selectedContractId, setSelectedContractId] = useState<string | null>(null);
@@ -71,6 +75,14 @@ export function DashboardShell() {
               onViewPolicy={setSelectedPolicyId}
               onViewContract={setSelectedContractId}
               onUpload={() => setShowUpload(true)}
+              onConnectEmail={() => {
+                if (isLocalDev) {
+                  setActiveView('settings');
+                } else {
+                  const userId = user?.id ?? '';
+                  window.location.href = `${APP_URL}/api/auth/google?userId=${encodeURIComponent(userId)}`;
+                }
+              }}
             />
           )}
           {activeView === 'invoices' && (
