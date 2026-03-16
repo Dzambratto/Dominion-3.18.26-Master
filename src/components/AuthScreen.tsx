@@ -68,7 +68,7 @@ export function AuthScreen({ onSuccess, onBack, initialMode = 'signup' }: AuthSc
       )}
       {/* Logo */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '40px' }}>
-        <img src="/dominion-logo.png" alt="Dominion" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+        <img src="/dominion-logo-transparent.png" alt="Dominion" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
         <span style={{ color: '#fff', fontSize: '22px', fontWeight: 700, letterSpacing: '-0.5px' }}>Dominion</span>
       </div>
 

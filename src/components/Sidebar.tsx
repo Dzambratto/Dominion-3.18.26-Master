@@ -36,8 +36,8 @@ export function Sidebar({ activeView, onNavigate, alertCount, summary }: Sidebar
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
-            <img src="/dominion-logo.png" alt="Dominion" width={40} height={40} className="w-full h-full object-contain" />
+          <div className="w-10 h-10 flex-shrink-0">
+            <img src="/dominion-logo-transparent.png" alt="Dominion" width={40} height={40} className="w-full h-full object-contain" />
           </div>
           <div>
             <div className="text-white font-bold text-base leading-tight">Dominion</div>
