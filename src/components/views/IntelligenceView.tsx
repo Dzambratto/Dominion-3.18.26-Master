@@ -1,601 +1,302 @@
-
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
-  Brain, AlertTriangle, TrendingUp, Building2, Users, DollarSign,
-  ChevronRight, Shield, Repeat, BarChart3, Zap, CheckCircle,
-  Clock, X, ArrowUpRight, Filter, RefreshCw
+  Brain, AlertTriangle, TrendingUp, TrendingDown, Building2, Users,
+  DollarSign, Shield, Repeat, BarChart3, CheckCircle, RefreshCw,
+  ChevronRight, X, Clock, FileText
 } from 'lucide-react';
-import { runPatternEngine, buildVendorProfiles, buildPropertyProfiles, invoiceToEvent } from '@/lib/pattern-engine';
-import { generateMonthlyReport } from '@/lib/pattern-engine';
-import { PatternAlert, PatternAlertType, PatternAlertSeverity, VendorProfile, PropertyProfile } from '@/lib/pattern-types';
-import { PATTERN_INVOICES, PROPERTY_MAP, SAVINGS_FROM_ANOMALIES } from '@/lib/pattern-mock-data';
-import { MOCK_RENEWALS, MOCK_CONTRACTS } from '@/lib/mock-data';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const ALERT_ICONS: Record<PatternAlertType, React.ElementType> = {
-  repeated_service: Repeat,
-  vendor_quality: Users,
-  cost_spike: TrendingUp,
-  contract_mismatch: Shield,
-  duplicate_invoice: AlertTriangle,
-  vendor_price_increase: ArrowUpRight,
-  property_risk: Building2,
-  renewal_risk: Clock,
-  missing_info: AlertTriangle,
-  vendor_billing_anomaly: BarChart3,
-};
+type Severity = 'critical' | 'high' | 'medium' | 'low';
+type AlertType = 'cost_spike' | 'duplicate' | 'vendor_quality' | 'contract_breach' |
+  'coverage_gap' | 'cash_flow' | 'seasonal' | 'market_rate' | 'repeated_service' | 'renewal';
 
-const ALERT_COLORS: Record<PatternAlertSeverity, { bg: string; border: string; badge: string; text: string; icon: string }> = {
-  critical: {
-    bg: 'bg-red-950/40',
-    border: 'border-red-500/40',
-    badge: 'bg-red-500/20 text-red-400 border border-red-500/30',
-    text: 'text-red-400',
-    icon: 'text-red-400',
-  },
-  high: {
-    bg: 'bg-orange-950/30',
-    border: 'border-orange-500/30',
-    badge: 'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-    text: 'text-orange-400',
-    icon: 'text-orange-400',
-  },
-  medium: {
-    bg: 'bg-yellow-950/20',
-    border: 'border-yellow-500/20',
-    badge: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-    text: 'text-yellow-400',
-    icon: 'text-yellow-400',
-  },
-  low: {
-    bg: 'bg-blue-950/20',
-    border: 'border-blue-500/20',
-    badge: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
-    text: 'text-blue-400',
-    icon: 'text-blue-400',
-  },
-};
-
-const ALERT_TYPE_LABELS: Record<PatternAlertType, string> = {
-  repeated_service: 'Repeated Service',
-  vendor_quality: 'Vendor Quality',
-  cost_spike: 'Cost Spike',
-  contract_mismatch: 'Contract Mismatch',
-  duplicate_invoice: 'Duplicate Invoice',
-  vendor_price_increase: 'Price Increase',
-  property_risk: 'Property Risk',
-  renewal_risk: 'Renewal Risk',
-  missing_info: 'Missing Info',
-  vendor_billing_anomaly: 'Billing Anomaly',
-};
-
-function fmt(n: number) {
-  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+interface PatternAlert {
+  id: string; type: AlertType; severity: Severity; title: string;
+  description: string; amount: number; recoverable: boolean;
+  vendor?: string; property?: string; detectedAt: string; dismissed: boolean;
 }
 
-// ─── Alert Card ───────────────────────────────────────────────────────────────
+interface VendorProfile {
+  id: string; name: string; category: string; reputationScore: number;
+  totalSpend: number; invoiceCount: number; flaggedCount: number;
+  avgResponseTime: string; trend: 'up' | 'down' | 'stable';
+}
+
+const fmt = (n: number) => '$' + n.toLocaleString();
+
+const SEVERITY_CONFIG: Record<Severity, { label: string; color: string; bg: string; border: string; dot: string }> = {
+  critical: { label: 'CRITICAL', color: '#DC2626', bg: '#FEF2F2', border: '#FECACA', dot: '#EF4444' },
+  high:     { label: 'HIGH',     color: '#D97706', bg: '#FFFBEB', border: '#FDE68A', dot: '#F59E0B' },
+  medium:   { label: 'MEDIUM',   color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE', dot: '#3B82F6' },
+  low:      { label: 'LOW',      color: '#059669', bg: '#F0FDF4', border: '#BBF7D0', dot: '#10B981' },
+};
+
+const TYPE_LABELS: Record<AlertType, string> = {
+  cost_spike: 'Cost Spike', duplicate: 'Duplicate', vendor_quality: 'Vendor Quality',
+  contract_breach: 'Contract Breach', coverage_gap: 'Coverage Gap', cash_flow: 'Cash Flow',
+  seasonal: 'Seasonal', market_rate: 'Market Rate', repeated_service: 'Repeated Service', renewal: 'Renewal',
+};
+
+// Suppress unused import warnings
+const _unused = { TrendingUp, TrendingDown, DollarSign, Shield, Repeat, BarChart3, AlertTriangle, Clock, FileText };
+void _unused;
+
+const MOCK_ALERTS: PatternAlert[] = [
+  { id: '1', type: 'cost_spike', severity: 'critical', title: 'Maintenance cost spike at 89 Cedar Avenue', description: 'Maintenance costs increased 340% vs. 90-day average. Current month: $4,200. Average: $1,240.', amount: 2960, recoverable: true, vendor: 'HandyPro Services', property: '89 Cedar Avenue', detectedAt: '2 hours ago', dismissed: false },
+  { id: '2', type: 'repeated_service', severity: 'critical', title: 'Repeated plumbing issue at 123 Main Street', description: 'Same plumbing vendor dispatched 4 times in 35 days. Total spend: $5,800. Root cause unresolved.', amount: 5800, recoverable: true, vendor: 'QuickFix Plumbing', property: '123 Main Street', detectedAt: '5 hours ago', dismissed: false },
+  { id: '3', type: 'duplicate', severity: 'high', title: 'Possible duplicate invoice from Apex IT Solutions', description: 'Invoice #INV-2024-891 appears to duplicate #INV-2024-847 — same amount, same line items, 12 days apart.', amount: 3200, recoverable: true, vendor: 'Apex IT Solutions', detectedAt: '1 day ago', dismissed: false },
+  { id: '4', type: 'renewal', severity: 'high', title: 'General Liability policy expires in 23 days', description: 'Policy #GL-2024-0091 expires March 15. Auto-renewal not confirmed. 3 competitive quotes available.', amount: 8400, recoverable: false, vendor: 'Hartford Insurance', detectedAt: '3 days ago', dismissed: false },
+  { id: '5', type: 'market_rate', severity: 'medium', title: 'Landscaping rates 28% above market benchmark', description: 'Current contract at $1,850/month. Market average for comparable properties: $1,445/month.', amount: 4860, recoverable: true, vendor: 'GreenScape Pro', detectedAt: '1 week ago', dismissed: false },
+  { id: '6', type: 'contract_breach', severity: 'medium', title: 'HVAC vendor exceeded agreed response time SLA', description: 'Contract requires 4-hour emergency response. Last 3 calls averaged 7.2 hours. Penalty clause applies.', amount: 1500, recoverable: true, vendor: 'CoolAir HVAC', detectedAt: '2 days ago', dismissed: false },
+  { id: '7', type: 'cash_flow', severity: 'low', title: 'Unusually high Q1 spend vs. prior year', description: 'Q1 operational spend is 22% above Q1 2023. Primary drivers: maintenance (+41%) and utilities (+18%).', amount: 12400, recoverable: false, detectedAt: '1 week ago', dismissed: false },
+];
+
+const MOCK_VENDORS: VendorProfile[] = [
+  { id: 'v1', name: 'HandyPro Services', category: 'Maintenance', reputationScore: 42, totalSpend: 28400, invoiceCount: 34, flaggedCount: 8, avgResponseTime: '6.2 hrs', trend: 'down' },
+  { id: 'v2', name: 'QuickFix Plumbing', category: 'Plumbing', reputationScore: 38, totalSpend: 19200, invoiceCount: 22, flaggedCount: 6, avgResponseTime: '4.8 hrs', trend: 'down' },
+  { id: 'v3', name: 'GreenScape Pro', category: 'Landscaping', reputationScore: 71, totalSpend: 22200, invoiceCount: 12, flaggedCount: 1, avgResponseTime: '24 hrs', trend: 'stable' },
+  { id: 'v4', name: 'Apex IT Solutions', category: 'Technology', reputationScore: 65, totalSpend: 38400, invoiceCount: 18, flaggedCount: 3, avgResponseTime: '2.1 hrs', trend: 'stable' },
+  { id: 'v5', name: 'CoolAir HVAC', category: 'HVAC', reputationScore: 58, totalSpend: 31600, invoiceCount: 28, flaggedCount: 4, avgResponseTime: '7.2 hrs', trend: 'down' },
+  { id: 'v6', name: 'SecureGuard', category: 'Security', reputationScore: 89, totalSpend: 14400, invoiceCount: 12, flaggedCount: 0, avgResponseTime: '1.5 hrs', trend: 'up' },
+];
+
+function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 shadow-sm">
+      <div className="text-xs font-medium text-[#64748B] mb-1 uppercase tracking-wide">{label}</div>
+      <div className="text-2xl font-bold" style={{ color: color ?? '#0F172A' }}>{value}</div>
+      {sub && <div className="text-xs text-[#94A3B8] mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
 function AlertCard({ alert, onDismiss }: { alert: PatternAlert; onDismiss: (id: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const colors = ALERT_COLORS[alert.severity];
-  const Icon = ALERT_ICONS[alert.type];
-
+  const cfg = SEVERITY_CONFIG[alert.severity];
   return (
-    <div className={`rounded-xl border p-4 transition-all ${colors.bg} ${colors.border}`}>
-      <div className="flex items-start gap-3">
-        <div className={`mt-0.5 p-2 rounded-lg bg-white/5 ${colors.icon}`}>
-          <Icon size={16} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${colors.badge}`}>
-                {alert.severity.toUpperCase()}
+    <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <div className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.dot }} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{cfg.label}</span>
+              <span className="text-[11px] text-[#64748B]">{TYPE_LABELS[alert.type]}</span>
+              {alert.vendor && <span className="text-[11px] text-[#94A3B8]">· {alert.vendor}</span>}
+            </div>
+            <h3 className="text-sm font-semibold text-[#0F172A] mb-1 leading-snug">{alert.title}</h3>
+            <p className="text-xs text-[#64748B] leading-relaxed mb-2">{alert.description}</p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: alert.recoverable ? '#F0FDF4' : '#FEF2F2', color: alert.recoverable ? '#059669' : '#DC2626' }}>
+                {fmt(alert.amount)} {alert.recoverable ? '· recoverable' : '· at risk'}
               </span>
-              <span className="text-xs text-slate-500">{ALERT_TYPE_LABELS[alert.type]}</span>
+              <span className="text-[11px] text-[#94A3B8]">{alert.detectedAt}</span>
             </div>
-            <button
-              onClick={() => onDismiss(alert.id)}
-              className="text-slate-600 hover:text-slate-400 transition-colors flex-shrink-0"
-            >
-              <X size={14} />
-            </button>
           </div>
-          <p className="text-sm font-semibold text-white mb-1">{alert.title}</p>
-          <p className="text-xs text-slate-400 leading-relaxed">{alert.description}</p>
-
-          {alert.estimatedSavings && alert.estimatedSavings > 0 && (
-            <div className="mt-2 inline-flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2.5 py-1">
-              <DollarSign size={11} />
-              <span>${fmt(alert.estimatedSavings)} at risk / recoverable</span>
-            </div>
-          )}
-
-          {expanded && (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <p className="text-xs text-slate-300 font-medium mb-1">Recommended Action</p>
-              <p className="text-xs text-slate-400 leading-relaxed">{alert.recommendation}</p>
-              {(alert.property || alert.vendorName) && (
-                <div className="mt-2 flex gap-3 flex-wrap">
-                  {alert.property && (
-                    <span className="text-xs text-slate-500">
-                      <span className="text-slate-400">Property:</span> {alert.property}
-                    </span>
-                  )}
-                  {alert.vendorName && (
-                    <span className="text-xs text-slate-500">
-                      <span className="text-slate-400">Vendor:</span> {alert.vendorName}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="mt-2 text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
-          >
-            {expanded ? 'Show less' : 'View recommendation'}
-            <ChevronRight size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
-          </button>
         </div>
+        <button onClick={() => onDismiss(alert.id)} className="text-[#CBD5E1] hover:text-[#64748B] transition-colors flex-shrink-0 mt-0.5"><X size={14} /></button>
+      </div>
+      <div className="mt-3 pt-3 border-t border-[#F1F5F9]">
+        <button className="flex items-center gap-1 text-xs font-medium text-[#3B82F6] hover:text-blue-700 transition-colors">
+          View recommendation <ChevronRight size={12} />
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Savings Widget ───────────────────────────────────────────────────────────
-function SavingsWidget({ totalSavings, duplicates, mismatches, priceIncreases }: {
-  totalSavings: number;
-  duplicates: number;
-  mismatches: number;
-  priceIncreases: number;
-}) {
+function ScoreBar({ score }: { score: number }) {
+  const color = score >= 75 ? '#10B981' : score >= 50 ? '#F59E0B' : '#EF4444';
   return (
-    <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/60 to-slate-900/80 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="p-2 rounded-lg bg-emerald-500/20">
-          <DollarSign size={18} className="text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-xs text-slate-400 uppercase tracking-wider">Savings Detected This Month</p>
-          <p className="text-2xl font-bold text-emerald-400">${fmt(totalSavings)}</p>
-        </div>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${score}%`, backgroundColor: color }} />
       </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div className="text-center p-2 rounded-lg bg-white/5">
-          <p className="text-lg font-bold text-white">{duplicates}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Duplicates<br />Prevented</p>
-        </div>
-        <div className="text-center p-2 rounded-lg bg-white/5">
-          <p className="text-lg font-bold text-white">{mismatches}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Contract<br />Mismatches</p>
-        </div>
-        <div className="text-center p-2 rounded-lg bg-white/5">
-          <p className="text-lg font-bold text-white">{priceIncreases}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Price<br />Increases</p>
-        </div>
-      </div>
+      <span className="text-xs font-bold w-6 text-right" style={{ color }}>{score}</span>
     </div>
   );
 }
 
-// ─── Vendor Reputation Panel ──────────────────────────────────────────────────
-function VendorReputationPanel({ vendors }: { vendors: VendorProfile[] }) {
-  const sorted = [...vendors].sort((a, b) => b.revisitRate - a.revisitRate).slice(0, 6);
+type TabId = 'alerts' | 'vendors' | 'monthly';
 
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <Users size={16} className="text-blue-400" />
-        <h3 className="text-sm font-semibold text-white">Vendor Reputation</h3>
-        <span className="ml-auto text-xs text-slate-500">Revisit Rate vs. Portfolio Avg</span>
-      </div>
-      <div className="space-y-3">
-        {sorted.map(vendor => {
-          const rate = Math.round(vendor.revisitRate * 100);
-          const avg = Math.round(vendor.portfolioAvgRevisitRate * 100);
-          const isAbove = vendor.revisitRate > vendor.portfolioAvgRevisitRate * 1.5;
-          const barWidth = Math.min(100, rate * 2);
-
-          return (
-            <div key={vendor.vendorId} className="space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-300 truncate max-w-[160px]">{vendor.vendorName}</span>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold ${isAbove ? 'text-orange-400' : 'text-emerald-400'}`}>
-                    {rate}%
-                  </span>
-                  <span className="text-xs text-slate-600">avg {avg}%</span>
-                </div>
-              </div>
-              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${isAbove ? 'bg-orange-500' : 'bg-emerald-500'}`}
-                  style={{ width: `${barWidth}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Property Intelligence Panel ─────────────────────────────────────────────
-function PropertyIntelligencePanel({ properties }: { properties: PropertyProfile[] }) {
-  const sorted = [...properties].sort((a, b) => b.riskScore - a.riskScore).slice(0, 5);
-
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <Building2 size={16} className="text-purple-400" />
-        <h3 className="text-sm font-semibold text-white">Property Intelligence</h3>
-        <span className="ml-auto text-xs text-slate-500">Risk Score</span>
-      </div>
-      <div className="space-y-3">
-        {sorted.map(property => {
-          const riskColor =
-            property.riskScore >= 70 ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-            property.riskScore >= 40 ? 'text-orange-400 bg-orange-500/10 border-orange-500/20' :
-            'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
-
-          return (
-            <div key={property.propertyId} className="flex items-center justify-between p-2.5 rounded-lg bg-white/5">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-200 truncate">{property.propertyName}</p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {property.totalServiceEvents} events · ${fmt(property.totalMaintenanceSpend)} spend
-                </p>
-              </div>
-              <div className={`ml-3 flex-shrink-0 text-xs font-bold px-2 py-1 rounded-full border ${riskColor}`}>
-                {property.riskScore}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─── Portfolio Health Card ────────────────────────────────────────────────────
-function PortfolioHealthCard({ health, totalAlerts, critical, high }: {
-  health: string;
-  totalAlerts: number;
-  critical: number;
-  high: number;
-}) {
-  const healthConfig = {
-    excellent: { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20', label: 'Excellent', icon: CheckCircle },
-    good: { color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20', label: 'Good', icon: CheckCircle },
-    needs_attention: { color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', label: 'Needs Attention', icon: AlertTriangle },
-    at_risk: { color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20', label: 'At Risk', icon: AlertTriangle },
-  };
-  const config = healthConfig[health as keyof typeof healthConfig] || healthConfig.good;
-  const HealthIcon = config.icon;
-
-  return (
-    <div className={`rounded-2xl border p-4 ${config.bg}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <HealthIcon size={16} className={config.color} />
-        <span className="text-xs text-slate-400 uppercase tracking-wider">Portfolio Health</span>
-        <span className={`ml-auto text-sm font-bold ${config.color}`}>{config.label}</span>
-      </div>
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <div>
-          <p className="text-xl font-bold text-white">{totalAlerts}</p>
-          <p className="text-xs text-slate-500">Total Alerts</p>
-        </div>
-        <div>
-          <p className="text-xl font-bold text-red-400">{critical}</p>
-          <p className="text-xs text-slate-500">Critical</p>
-        </div>
-        <div>
-          <p className="text-xl font-bold text-orange-400">{high}</p>
-          <p className="text-xs text-slate-500">High</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Intelligence View ───────────────────────────────────────────────────
 export default function IntelligenceView() {
-  const [activeFilter, setActiveFilter] = useState<PatternAlertType | 'all'>('all');
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'alerts' | 'vendors' | 'properties' | 'report'>('alerts');
+  const [alerts, setAlerts] = useState<PatternAlert[]>(MOCK_ALERTS);
+  const [activeTab, setActiveTab] = useState<TabId>('alerts');
+  const [filterType, setFilterType] = useState<AlertType | 'all'>('all');
 
-  // Run pattern engine on demo data
-  const intelligence = useMemo(() => {
-    return runPatternEngine(
-      PATTERN_INVOICES,
-      MOCK_CONTRACTS || [],
-      [],
-      MOCK_RENEWALS || [],
-      PROPERTY_MAP
-    );
-  }, []);
+  const activeAlerts = alerts.filter(a => !a.dismissed);
+  const critical = activeAlerts.filter(a => a.severity === 'critical');
+  const high = activeAlerts.filter(a => a.severity === 'high');
+  const totalRecoverable = activeAlerts.filter(a => a.recoverable).reduce((s, a) => s + a.amount, 0);
+  const filteredAlerts = filterType === 'all' ? activeAlerts : activeAlerts.filter(a => a.type === filterType);
+  const dismiss = (id: string) => setAlerts(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
+  const alertTypeCounts = activeAlerts.reduce((acc, a) => { acc[a.type] = (acc[a.type] ?? 0) + 1; return acc; }, {} as Record<string, number>);
 
-  const report = useMemo(() => generateMonthlyReport(PATTERN_INVOICES, intelligence), [intelligence]);
-
-  const events = useMemo(() =>
-    PATTERN_INVOICES.map(inv => invoiceToEvent(inv, PROPERTY_MAP[inv.id])),
-    []
-  );
-
-  const vendorProfiles = useMemo(() => buildVendorProfiles(events), [events]);
-  const propertyProfiles = useMemo(() => buildPropertyProfiles(events, intelligence.alerts), [events, intelligence.alerts]);
-
-  const visibleAlerts = useMemo(() =>
-    intelligence.alerts.filter(a =>
-      !dismissedIds.has(a.id) &&
-      (activeFilter === 'all' || a.type === activeFilter)
-    ),
-    [intelligence.alerts, dismissedIds, activeFilter]
-  );
-
-  const totalSavings = intelligence.totalSavingsIdentified + SAVINGS_FROM_ANOMALIES.totalSavingsDetected;
-
-  const filterTypes: Array<{ value: PatternAlertType | 'all'; label: string; count: number }> = [
-    { value: 'all', label: 'All', count: intelligence.alerts.filter(a => !dismissedIds.has(a.id)).length },
-    { value: 'repeated_service', label: 'Repeated Service', count: intelligence.alerts.filter(a => a.type === 'repeated_service').length },
-    { value: 'vendor_price_increase', label: 'Price Increases', count: intelligence.alerts.filter(a => a.type === 'vendor_price_increase').length },
-    { value: 'property_risk', label: 'Property Risk', count: intelligence.alerts.filter(a => a.type === 'property_risk').length },
-    { value: 'vendor_quality', label: 'Vendor Quality', count: intelligence.alerts.filter(a => a.type === 'vendor_quality').length },
-    { value: 'renewal_risk', label: 'Renewals', count: intelligence.alerts.filter(a => a.type === 'renewal_risk').length },
-    { value: 'cost_spike', label: 'Cost Spikes', count: intelligence.alerts.filter(a => a.type === 'cost_spike').length },
+  const TABS: { id: TabId; label: string }[] = [
+    { id: 'alerts', label: 'Alerts' },
+    { id: 'vendors', label: 'Vendor Intelligence' },
+    { id: 'monthly', label: 'Monthly Report' },
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-violet-500/20 border border-violet-500/30">
-            <Brain size={22} className="text-violet-400" />
+          <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
+            <Brain size={18} className="text-[#3B82F6]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">AI Intelligence</h1>
-            <p className="text-xs text-slate-500 mt-0.5">Historical pattern detection · Operational oversight</p>
+            <h2 className="text-base font-semibold text-[#0F172A]">AI Operational Intelligence</h2>
+            <p className="text-xs text-[#64748B]">Pattern detection · Continuous monitoring</p>
           </div>
         </div>
-        <button className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-slate-700 hover:border-slate-500">
-          <RefreshCw size={12} />
-          Refresh
+        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#EFF6FF] text-[#3B82F6] hover:bg-[#DBEAFE] transition-colors">
+          <RefreshCw size={12} /> Refresh
         </button>
       </div>
 
-      {/* Top Stats Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-xs text-slate-500 mb-1">Active Alerts</p>
-          <p className="text-2xl font-bold text-white">{visibleAlerts.length}</p>
-          <p className="text-xs text-red-400 mt-1">{intelligence.criticalAlerts} critical</p>
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-xs text-slate-500 mb-1">Savings Identified</p>
-          <p className="text-2xl font-bold text-emerald-400">${fmt(totalSavings)}</p>
-          <p className="text-xs text-slate-500 mt-1">this month</p>
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-xs text-slate-500 mb-1">Vendor Anomalies</p>
-          <p className="text-2xl font-bold text-orange-400">{intelligence.vendorAnomalies}</p>
-          <p className="text-xs text-slate-500 mt-1">price or quality issues</p>
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <p className="text-xs text-slate-500 mb-1">Properties Monitored</p>
-          <p className="text-2xl font-bold text-blue-400">{propertyProfiles.length}</p>
-          <p className="text-xs text-slate-500 mt-1">{intelligence.propertyRisks} at risk</p>
-        </div>
+      {/* Stat Cards */}
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        <StatCard label="Active Alerts" value={activeAlerts.length} sub={`${critical.length} critical`} color={critical.length > 0 ? '#DC2626' : '#0F172A'} />
+        <StatCard label="Recoverable Savings" value={fmt(totalRecoverable)} sub="flagged this month" color="#059669" />
+        <StatCard label="Critical Issues" value={critical.length} sub="need immediate action" color={critical.length > 0 ? '#DC2626' : '#0F172A'} />
+        <StatCard label="High Priority" value={high.length} sub="review this week" color={high.length > 0 ? '#D97706' : '#0F172A'} />
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-900/60 border border-slate-800 rounded-xl p-1">
-        {[
-          { id: 'alerts', label: 'Alerts', icon: AlertTriangle },
-          { id: 'vendors', label: 'Vendor Intelligence', icon: Users },
-          { id: 'properties', label: 'Property Intelligence', icon: Building2 },
-          { id: 'report', label: 'Monthly Report', icon: BarChart3 },
-        ].map(tab => {
-          const TabIcon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-violet-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <TabIcon size={13} />
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-1 bg-[#F1F5F9] rounded-lg p-1 mb-5">
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium transition-all flex-1 justify-center ${activeTab === tab.id ? 'bg-white text-[#0F172A] shadow-sm' : 'text-[#64748B] hover:text-[#0F172A]'}`}>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Alerts Tab */}
       {activeTab === 'alerts' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Alert Feed */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Filter Pills */}
-            <div className="flex gap-2 flex-wrap">
-              <Filter size={14} className="text-slate-500 mt-1.5" />
-              {filterTypes.map(f => (
-                <button
-                  key={f.value}
-                  onClick={() => setActiveFilter(f.value)}
-                  className={`text-xs px-3 py-1 rounded-full border transition-all ${
-                    activeFilter === f.value
-                      ? 'bg-violet-600 border-violet-500 text-white'
-                      : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'
-                  }`}
-                >
-                  {f.label} {f.count > 0 && <span className="opacity-70">({f.count})</span>}
+        <div className="grid grid-cols-3 gap-5">
+          <div className="col-span-2">
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              <button onClick={() => setFilterType('all')} className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${filterType === 'all' ? 'bg-[#3B82F6] text-white' : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'}`}>All ({activeAlerts.length})</button>
+              {(Object.entries(alertTypeCounts) as [AlertType, number][]).map(([type, count]) => (
+                <button key={type} onClick={() => setFilterType(type)} className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${filterType === type ? 'bg-[#3B82F6] text-white' : 'bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0]'}`}>
+                  {TYPE_LABELS[type]} ({count})
                 </button>
               ))}
             </div>
-
-            {/* Alert Cards */}
-            <div className="space-y-3">
-              {visibleAlerts.length === 0 ? (
-                <div className="text-center py-12 text-slate-500">
-                  <CheckCircle size={32} className="mx-auto mb-3 text-emerald-500/50" />
-                  <p className="text-sm">No active alerts in this category</p>
+            <div className="flex flex-col gap-3">
+              {filteredAlerts.length === 0 ? (
+                <div className="bg-white rounded-xl border border-[#E2E8F0] p-8 text-center">
+                  <CheckCircle size={32} className="text-[#10B981] mx-auto mb-2" />
+                  <div className="text-sm font-semibold text-[#0F172A]">No alerts in this category</div>
+                  <div className="text-xs text-[#64748B] mt-1">All clear</div>
                 </div>
-              ) : (
-                visibleAlerts.map(alert => (
-                  <AlertCard
-                    key={alert.id}
-                    alert={alert}
-                    onDismiss={(id) => setDismissedIds(prev => new Set([...prev, id]))}
-                  />
-                ))
-              )}
+              ) : filteredAlerts.map(alert => <AlertCard key={alert.id} alert={alert} onDismiss={dismiss} />)}
             </div>
           </div>
-
-          {/* Right Sidebar */}
-          <div className="space-y-4">
-            <SavingsWidget
-              totalSavings={totalSavings}
-              duplicates={intelligence.duplicatesPrevented + SAVINGS_FROM_ANOMALIES.duplicatesPrevented}
-              mismatches={intelligence.contractMismatches + SAVINGS_FROM_ANOMALIES.contractMismatchesCaught}
-              priceIncreases={intelligence.alerts.filter(a => a.type === 'vendor_price_increase').length + SAVINGS_FROM_ANOMALIES.priceIncreasesChallenged}
-            />
-            <PortfolioHealthCard
-              health={report.portfolioHealth}
-              totalAlerts={intelligence.totalAlerts}
-              critical={intelligence.criticalAlerts}
-              high={intelligence.highAlerts}
-            />
+          <div className="flex flex-col gap-4">
+            <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 shadow-sm">
+              <div className="text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-3">Savings Detected This Month</div>
+              <div className="text-2xl font-bold text-[#059669] mb-3">{fmt(totalRecoverable)}</div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-[#F8FAFC] rounded-lg p-2"><div className="text-base font-bold text-[#0F172A]">{critical.length}</div><div className="text-[10px] text-[#94A3B8] leading-tight">Invoice Mismatches</div></div>
+                <div className="bg-[#F8FAFC] rounded-lg p-2"><div className="text-base font-bold text-[#0F172A]">{alertTypeCounts['duplicate'] ?? 0}</div><div className="text-[10px] text-[#94A3B8] leading-tight">Contract Mismatches</div></div>
+                <div className="bg-[#F8FAFC] rounded-lg p-2"><div className="text-base font-bold text-[#0F172A]">{alertTypeCounts['cost_spike'] ?? 0}</div><div className="text-[10px] text-[#94A3B8] leading-tight">Price Increases</div></div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-[#E2E8F0] p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Portfolio Health</div>
+                <span className="text-xs font-bold text-[#059669]">{critical.length === 0 ? 'Good' : critical.length <= 2 ? 'Fair' : 'At Risk'}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div><div className="text-lg font-bold text-[#0F172A]">{activeAlerts.length}</div><div className="text-[10px] text-[#94A3B8]">Total Alerts</div></div>
+                <div><div className="text-lg font-bold text-[#DC2626]">{critical.length}</div><div className="text-[10px] text-[#94A3B8]">Critical</div></div>
+                <div><div className="text-lg font-bold text-[#D97706]">{high.length}</div><div className="text-[10px] text-[#94A3B8]">High</div></div>
+              </div>
+            </div>
+            <div className="bg-[#F0FDF4] rounded-xl border border-[#BBF7D0] p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+                <span className="text-xs font-bold text-[#059669] uppercase tracking-wide">Engine Active</span>
+              </div>
+              <div className="text-xs text-[#065F46]">Monitoring 6 vendors · 142 invoices · 8 contracts</div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Vendor Intelligence Tab */}
       {activeTab === 'vendors' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <VendorReputationPanel vendors={vendorProfiles} />
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Zap size={14} className="text-yellow-400" />
-              Vendor Spend Summary
-            </h3>
-            {vendorProfiles.slice(0, 8).map(vendor => (
-              <div key={vendor.vendorId} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-200 truncate">{vendor.vendorName}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 capitalize">{vendor.category.replace('_', ' ')} · {vendor.totalInvoices} invoices</p>
-                </div>
-                <div className="text-right ml-3 flex-shrink-0">
-                  <p className="text-sm font-semibold text-white">${fmt(vendor.totalSpend)}</p>
-                  {vendor.priceIncreaseDetected && (
-                    <p className="text-xs text-orange-400 mt-0.5">↑ Price increase</p>
-                  )}
-                </div>
-              </div>
-            ))}
+        <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-sm">
+          <div className="p-4 border-b border-[#F1F5F9]">
+            <h3 className="text-sm font-semibold text-[#0F172A]">Vendor Reputation Scores</h3>
+            <p className="text-xs text-[#64748B] mt-0.5">Scored 0-100 based on invoice accuracy, response time, and contract compliance</p>
           </div>
-        </div>
-      )}
-
-      {/* Property Intelligence Tab */}
-      {activeTab === 'properties' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <PropertyIntelligencePanel properties={propertyProfiles} />
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <BarChart3 size={14} className="text-purple-400" />
-              Property Spend Breakdown
-            </h3>
-            {propertyProfiles.map(property => (
-              <div key={property.propertyId} className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-200">{property.propertyName}</p>
-                  <p className="text-sm font-semibold text-white">${fmt(property.totalMaintenanceSpend)}</p>
+          <div className="p-4">
+            {MOCK_VENDORS.map(vendor => {
+              const trendIcon = vendor.trend === 'up' ? '↑' : vendor.trend === 'down' ? '↓' : '→';
+              const trendColor = vendor.trend === 'up' ? '#10B981' : vendor.trend === 'down' ? '#EF4444' : '#94A3B8';
+              return (
+                <div key={vendor.id} className="flex items-center gap-4 py-3 border-b border-[#F1F5F9] last:border-0">
+                  <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center flex-shrink-0"><Building2 size={14} className="text-[#3B82F6]" /></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-sm font-semibold text-[#0F172A] truncate">{vendor.name}</span>
+                      <span className="text-[10px] text-[#94A3B8] bg-[#F1F5F9] px-1.5 py-0.5 rounded">{vendor.category}</span>
+                      <span className="text-xs font-bold" style={{ color: trendColor }}>{trendIcon}</span>
+                    </div>
+                    <ScoreBar score={vendor.reputationScore} />
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-sm font-semibold text-[#0F172A]">{fmt(vendor.totalSpend)}</div>
+                    <div className="text-[11px] text-[#94A3B8]">{vendor.invoiceCount} invoices · {vendor.flaggedCount} flagged</div>
+                  </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  {property.topCategories.slice(0, 3).map(cat => (
-                    <span key={cat.category} className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-slate-400 capitalize">
-                      {cat.category.replace('_', ' ')} (${fmt(cat.spend)})
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* Monthly Report Tab */}
-      {activeTab === 'report' && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-bold text-white">Operator Monthly Report</h2>
-                <p className="text-sm text-slate-500">{report.month}</p>
+      {activeTab === 'monthly' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] p-5 shadow-sm">
+            <h3 className="text-sm font-semibold text-[#0F172A] mb-4">Spend by Category</h3>
+            {[
+              { label: 'Maintenance', amount: 28400, pct: 34 },
+              { label: 'Technology', amount: 18200, pct: 22 },
+              { label: 'Insurance', amount: 14800, pct: 18 },
+              { label: 'Utilities', amount: 11200, pct: 13 },
+              { label: 'Landscaping', amount: 7400, pct: 9 },
+              { label: 'Other', amount: 3200, pct: 4 },
+            ].map(item => (
+              <div key={item.label} className="mb-3">
+                <div className="flex justify-between text-xs mb-1"><span className="text-[#0F172A] font-medium">{item.label}</span><span className="text-[#64748B]">{fmt(item.amount)}</span></div>
+                <div className="h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden"><div className="h-full bg-[#3B82F6] rounded-full" style={{ width: `${item.pct}%` }} /></div>
               </div>
-              <div className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                report.portfolioHealth === 'excellent' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-                report.portfolioHealth === 'good' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
-                report.portfolioHealth === 'needs_attention' ? 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20' :
-                'text-red-400 bg-red-500/10 border-red-500/20'
-              }`}>
-                {report.portfolioHealth.replace('_', ' ').toUpperCase()}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            ))}
+          </div>
+          <div className="flex flex-col gap-4">
+            <div className="bg-white rounded-xl border border-[#E2E8F0] p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-[#0F172A] mb-3">Month Summary</h3>
               {[
-                { label: 'Invoices Processed', value: report.totalInvoicesProcessed, color: 'text-white' },
-                { label: 'Total Spend', value: `$${fmt(report.totalSpend)}`, color: 'text-white' },
-                { label: 'Savings Detected', value: `$${fmt(report.savingsDetected + SAVINGS_FROM_ANOMALIES.totalSavingsDetected)}`, color: 'text-emerald-400' },
-                { label: 'Duplicates Prevented', value: report.duplicatesPrevented + SAVINGS_FROM_ANOMALIES.duplicatesPrevented, color: 'text-blue-400' },
-              ].map(stat => (
-                <div key={stat.label} className="text-center p-3 rounded-xl bg-white/5">
-                  <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
-                  <p className="text-xs text-slate-500 mt-1">{stat.label}</p>
+                { label: 'Total Spend', value: fmt(83200), color: '#0F172A' },
+                { label: 'Flagged for Review', value: fmt(totalRecoverable), color: '#D97706' },
+                { label: 'Recovered / Saved', value: fmt(4800), color: '#059669' },
+                { label: 'Alerts Generated', value: String(MOCK_ALERTS.length), color: '#3B82F6' },
+                { label: 'Vendors Monitored', value: String(MOCK_VENDORS.length), color: '#0F172A' },
+              ].map(row => (
+                <div key={row.label} className="flex justify-between items-center py-2 border-b border-[#F1F5F9] last:border-0">
+                  <span className="text-xs text-[#64748B]">{row.label}</span>
+                  <span className="text-sm font-semibold" style={{ color: row.color }}>{row.value}</span>
                 </div>
               ))}
             </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              {[
-                { label: 'Contract Mismatches', value: report.contractMismatchesFound + SAVINGS_FROM_ANOMALIES.contractMismatchesCaught, color: 'text-orange-400' },
-                { label: 'Repeated Service Events', value: report.repeatedServiceEvents, color: 'text-red-400' },
-                { label: 'Vendor Price Increases', value: report.vendorPriceIncreases + SAVINGS_FROM_ANOMALIES.priceIncreasesChallenged, color: 'text-yellow-400' },
-                { label: 'Renewals Approaching', value: report.renewalsApproaching, color: 'text-purple-400' },
-              ].map(stat => (
-                <div key={stat.label} className="text-center p-3 rounded-xl bg-white/5">
-                  <p className={`text-xl font-bold ${stat.color}`}>{stat.value}</p>
-                  <p className="text-xs text-slate-500 mt-1">{stat.label}</p>
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <h3 className="text-sm font-semibold text-white mb-3">Top Alerts This Month</h3>
-              <div className="space-y-2">
-                {report.topAlerts.map(alert => {
-                  const colors = ALERT_COLORS[alert.severity];
-                  const Icon = ALERT_ICONS[alert.type];
-                  return (
-                    <div key={alert.id} className={`flex items-center gap-3 p-3 rounded-lg border ${colors.bg} ${colors.border}`}>
-                      <Icon size={14} className={colors.icon} />
-                      <p className="text-xs text-slate-300 flex-1">{alert.title}</p>
-                      {alert.estimatedSavings && (
-                        <span className="text-xs text-emerald-400 font-semibold">${fmt(alert.estimatedSavings)}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="bg-[#EFF6FF] rounded-xl border border-[#BFDBFE] p-4">
+              <div className="flex items-center gap-2 mb-2"><Brain size={14} className="text-[#3B82F6]" /><span className="text-xs font-bold text-[#1D4ED8]">AI Insight</span></div>
+              <p className="text-xs text-[#1E40AF] leading-relaxed">Maintenance costs are trending 34% above Q1 last year. Consider auditing HandyPro Services and QuickFix Plumbing — both show repeated service patterns suggesting unresolved root causes.</p>
             </div>
           </div>
         </div>
