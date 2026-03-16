@@ -387,16 +387,15 @@ When a policy is approaching expiration, Dominion alerts you with enough lead ti
     {
       icon: <Package size={18} />,
       label: 'Order Automation',
-      title: 'Delivery orders processed in seconds, not hours',
-      description: `For businesses that move freight, every delivery order and bill of lading represents time and money. Dominion extracts all critical logistics data — shipper, consignee, weights, pickup windows, carrier rates — from any BOL format and flags anomalies before dispatch.
-
-Rate discrepancies, missing delivery windows, and conflicting addresses are caught before they become expensive mistakes.`,
+      title: 'Every order document handled automatically, across any industry',
+      description: `Whether you're managing freight and bills of lading, purchase orders from suppliers, work orders in construction or field services, or fulfillment documents in retail and distribution — Dominion reads them all. It extracts the critical data from any document format and flags discrepancies before they cause delays or cost you money.
+Manufacturers, logistics operators, contractors, wholesalers, and service businesses all run on order documents. Dominion makes sure nothing slips through.`,
       items: [
-        'BOL and delivery order extraction from any format',
-        'Shipper, consignee, and freight data parsing',
-        'Rate and window conflict detection',
-        'Carrier quote verification',
-        'Dispatch approval workflow',
+        'Purchase orders, BOLs, work orders, and fulfillment docs',
+        'Vendor, quantity, pricing, and delivery term extraction',
+        'Rate and delivery window conflict detection',
+        'Cross-reference against contracts and prior orders',
+        'Approval workflow with full audit trail',
       ],
       color: 'violet',
     },
@@ -731,7 +730,7 @@ function PricingSection({ onEnterApp }: { onEnterApp: () => void }) {
       features: [
         'Unlimited invoices',
         'Everything in Operator',
-        'Order Automation (BOL/freight)',
+        'Order Automation (POs, BOLs, work orders)',
         'Advanced vendor intelligence',
         'Team collaboration & roles',
         'API access',
