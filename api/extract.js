@@ -1,41 +1,22 @@
 /**
  * /api/extract
  *
- * Accepts a base64-encoded document (PDF or image) and uses GPT-4o Vision
- * to extract structured invoice/contract data.
+ * AI document extraction endpoint. Accepts a base64-encoded document (image or PDF)
+ * and returns structured financial data.
  *
- * POST body (JSON):
- *   {
- *     data: string,        // base64-encoded file content
- *     mimeType: string,    // e.g. "application/pdf" or "image/jpeg"
- *     filename: string,    // original filename for context
- *     emailSubject: string,
- *     emailFrom: string,
- *     emailDate: string,
- *   }
+ * FIX (Claude audit): PDFs are now sent to Claude via native base64 document blocks.
+ * Claude reads PDFs natively — no more sending 500 chars of garbled base64 to GPT-4o.
+ * Images continue to use GPT-4o vision. Falls back gracefully if only one key is set.
  *
- * Returns structured JSON:
- *   {
- *     type: "invoice" | "contract" | "insurance" | "receipt" | "other",
- *     vendor: string,
- *     vendorEmail: string,
- *     amount: number | null,
- *     currency: string,
- *     invoiceNumber: string,
- *     invoiceDate: string,
- *     dueDate: string,
- *     lineItems: [{ description, quantity, unitPrice, total }],
- *     paymentTerms: string,
- *     confidence: number,   // 0-1
- *     flags: string[],      // anomalies detected
- *     rawText: string,      // extracted text for search
- *   }
+ * Required env vars (add to Vercel):
+ *   ANTHROPIC_API_KEY — for PDF extraction (Claude claude-3-5-sonnet)
+ *   OPENAI_API_KEY    — for image extraction (GPT-4o vision)
  */
 
-const EXTRACTION_PROMPT = `You are a financial document extraction AI for Dominion, a business back-office platform.
+const EXTRACTION_PROMPT = `You are a financial document extraction AI for Dominion, an AP automation platform.
+Extract ALL financial data from the document provided. Be precise and thorough.
 
-Analyze the provided document and extract all financial information. Return ONLY valid JSON matching this exact schema:
-
+Return ONLY a valid JSON object with this exact structure:
 {
   "type": "invoice" | "contract" | "insurance" | "receipt" | "purchase_order" | "other",
   "vendor": "Company name that sent this document",
@@ -65,16 +46,72 @@ Analyze the provided document and extract all financial information. Return ONLY
   "flags": [],
   "rawText": "key text extracted from document"
 }
-
 For "flags", include any of these if detected:
-- "duplicate_suspected" — invoice number or amount matches a common pattern
-- "price_unusually_high" — amount seems high for the service type
-- "missing_invoice_number" — no invoice number found
-- "missing_due_date" — no due date found
-- "vague_line_items" — line items are not specific enough
-- "round_number_amount" — suspiciously round dollar amount
-
+- "duplicate_suspected"
+- "price_unusually_high"
+- "missing_invoice_number"
+- "missing_due_date"
+- "vague_line_items"
+- "round_number_amount"
 If a field is not found, use null. Dates must be in YYYY-MM-DD format. Return ONLY the JSON object, no markdown, no explanation.`;
+
+async function extractWithOpenAI(openaiKey, userContent) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: EXTRACTION_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+      max_tokens: 1500,
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`OpenAI API error ${res.status}: ${JSON.stringify(err)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '{}';
+}
+
+async function extractWithClaude(anthropicKey, base64Data, mimeType, contextText) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': anthropicKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 1500,
+      system: EXTRACTION_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            ...(contextText ? [{ type: 'text', text: contextText }] : []),
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: mimeType, data: base64Data },
+            },
+            { type: 'text', text: 'Extract all financial data from this document and return as JSON per the system instructions.' },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Anthropic API error ${res.status}: ${JSON.stringify(err)}`);
+  }
+  const data = await res.json();
+  return data.content?.[0]?.text || '{}';
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -84,99 +121,94 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY not configured' });
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!openaiKey && !anthropicKey) {
+    return res.status(500).json({
+      error: 'No AI API key configured. Add OPENAI_API_KEY (images) and/or ANTHROPIC_API_KEY (PDFs) to Vercel environment variables.',
+    });
   }
 
   const { data, mimeType, filename, emailSubject, emailFrom, emailDate } = req.body || {};
+  if (!data) return res.status(400).json({ error: 'data (base64 document) is required' });
 
-  if (!data) {
-    return res.status(400).json({ error: 'data (base64 document) is required' });
-  }
-
-  // Build the message content for GPT-4o
-  const userContent = [];
-
-  // Add context from the email
-  if (emailSubject || emailFrom) {
-    userContent.push({
-      type: 'text',
-      text: `Email context:\n- Subject: ${emailSubject || 'N/A'}\n- From: ${emailFrom || 'N/A'}\n- Date: ${emailDate || 'N/A'}\n- Filename: ${filename || 'N/A'}\n\nExtract all financial data from the document below:`,
-    });
-  }
-
-  // For images, use vision directly
-  const isImage = mimeType && (mimeType.startsWith('image/'));
+  const isImage = mimeType && mimeType.startsWith('image/');
   const isPdf = mimeType === 'application/pdf';
+  const contextText = (emailSubject || emailFrom)
+    ? `Email context:\n- Subject: ${emailSubject || 'N/A'}\n- From: ${emailFrom || 'N/A'}\n- Date: ${emailDate || 'N/A'}\n- Filename: ${filename || 'N/A'}\n\nExtract all financial data from the document below:`
+    : null;
 
-  if (isImage) {
-    userContent.push({
-      type: 'image_url',
-      image_url: {
-        url: `data:${mimeType};base64,${data}`,
-        detail: 'high',
-      },
-    });
-  } else if (isPdf) {
-    // For PDFs, we pass the base64 data as a file reference
-    // GPT-4o can handle PDF via the file API, but for simplicity we'll
-    // send it as a base64 image_url with pdf mime type
-    userContent.push({
-      type: 'text',
-      text: `[PDF document attached as base64: ${filename || 'document.pdf'}]\nBase64 data (first 500 chars): ${data.slice(0, 500)}...\n\nNote: Extract what you can from the filename and email context if the PDF content is not directly readable.`,
-    });
-  } else {
-    userContent.push({
-      type: 'text',
-      text: `Document filename: ${filename}\nMime type: ${mimeType}\nExtract financial data based on filename and email context.`,
-    });
-  }
-
+  let rawContent;
   try {
-    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: [
-          { role: 'system', content: EXTRACTION_PROMPT },
-          { role: 'user', content: userContent },
-        ],
-        max_tokens: 1500,
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-      }),
-    });
-
-    if (!openaiRes.ok) {
-      const err = await openaiRes.json().catch(() => ({}));
-      console.error('OpenAI API error:', err);
-      return res.status(openaiRes.status).json({ error: 'openai_error', details: err });
+    if (isPdf) {
+      if (anthropicKey) {
+        // Claude reads PDFs natively via base64 document blocks — correct approach
+        rawContent = await extractWithClaude(anthropicKey, data, 'application/pdf', contextText);
+      } else {
+        // No Anthropic key — OpenAI cannot read PDFs. Extract from context only.
+        const userContent = [
+          { type: 'text', text: `${contextText || ''}\n\n[PDF: ${filename || 'document.pdf'}]\nNote: Add ANTHROPIC_API_KEY to Vercel for full PDF extraction.` },
+        ];
+        rawContent = await extractWithOpenAI(openaiKey, userContent);
+      }
+    } else if (isImage) {
+      if (openaiKey) {
+        const userContent = [
+          ...(contextText ? [{ type: 'text', text: contextText }] : []),
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${data}`, detail: 'high' } },
+        ];
+        rawContent = await extractWithOpenAI(openaiKey, userContent);
+      } else if (anthropicKey) {
+        // Claude vision fallback for images
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 1500,
+            system: EXTRACTION_PROMPT,
+            messages: [{
+              role: 'user',
+              content: [
+                ...(contextText ? [{ type: 'text', text: contextText }] : []),
+                { type: 'image', source: { type: 'base64', media_type: mimeType, data } },
+                { type: 'text', text: 'Extract all financial data and return as JSON.' },
+              ],
+            }],
+          }),
+        });
+        if (!r.ok) throw new Error(`Anthropic image error ${r.status}`);
+        const d = await r.json();
+        rawContent = d.content?.[0]?.text || '{}';
+      }
+    } else {
+      const userContent = [
+        { type: 'text', text: `${contextText || ''}\nFilename: ${filename}\nType: ${mimeType}\nExtract financial data from context.` },
+      ];
+      rawContent = openaiKey
+        ? await extractWithOpenAI(openaiKey, userContent)
+        : JSON.stringify({ type: 'other', confidence: 0.1, flags: ['unknown_format'] });
     }
-
-    const openaiData = await openaiRes.json();
-    const content = openaiData.choices?.[0]?.message?.content || '{}';
-
-    let extracted;
-    try {
-      extracted = JSON.parse(content);
-    } catch {
-      return res.status(500).json({ error: 'parse_error', raw: content });
-    }
-
-    // Add metadata
-    extracted.extractedAt = new Date().toISOString();
-    extracted.sourceFilename = filename;
-    extracted.sourceEmail = emailFrom;
-    extracted.sourceSubject = emailSubject;
-    extracted.sourceDate = emailDate;
-
-    return res.status(200).json(extracted);
   } catch (err) {
-    console.error('Extraction error:', err);
+    console.error('AI extraction error:', err);
     return res.status(500).json({ error: 'extraction_failed', message: err.message });
   }
+
+  // Parse JSON — strip markdown code fences if Claude wrapped output
+  let extracted;
+  try {
+    const cleaned = (rawContent || '{}').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    extracted = JSON.parse(cleaned);
+  } catch {
+    console.error('JSON parse error, raw:', rawContent?.slice(0, 200));
+    return res.status(500).json({ error: 'parse_error', message: 'AI returned invalid JSON' });
+  }
+
+  extracted.extractedAt = new Date().toISOString();
+  extracted.sourceFilename = filename;
+  extracted.sourceEmail = emailFrom;
+  extracted.sourceSubject = emailSubject;
+  extracted.sourceDate = emailDate;
+
+  return res.status(200).json(extracted);
 }

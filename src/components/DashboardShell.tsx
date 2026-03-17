@@ -17,8 +17,9 @@ import IntelligenceView from './views/IntelligenceView';
 import { UploadModal } from './UploadModal';
 import type { UploadDocType } from './UploadModal';
 
+// FIX (Claude audit): Removed isLocalDev bypass. OAuth now works in all environments.
+// For local dev, ensure VITE_APP_URL=http://localhost:5173 and add localhost redirect URI to Google/Microsoft consoles.
 const APP_URL = (import.meta as { env: Record<string, string> }).env.VITE_APP_URL || 'https://getdominiontech.com';
-const isLocalDev = APP_URL.includes('localhost') || APP_URL.includes('127.0.0.1');
 
 export type ViewId = 'inbox' | 'invoices' | 'contracts' | 'insurance' | 'orders' | 'payments' | 'intelligence' | 'settings';
 
@@ -76,12 +77,8 @@ export function DashboardShell() {
               onViewContract={setSelectedContractId}
               onUpload={() => setShowUpload(true)}
               onConnectEmail={() => {
-                if (isLocalDev) {
-                  setActiveView('settings');
-                } else {
-                  const userId = user?.id ?? '';
-                  window.location.href = `${APP_URL}/api/auth/google?userId=${encodeURIComponent(userId)}`;
-                }
+                const userId = user?.id ?? '';
+                window.location.href = `${APP_URL}/api/auth/google?userId=${encodeURIComponent(userId)}`;
               }}
             />
           )}

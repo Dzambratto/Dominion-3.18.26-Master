@@ -109,7 +109,10 @@ export default async function handler(req, res) {
   try {
     // Build Gmail search query for financial emails with attachments
     const afterDate = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
-    const query = `has:attachment (${FINANCIAL_KEYWORDS.slice(0, 8).join(' OR ')}) after:${afterDate}`;
+    // FIX (Claude audit): Use all financial keywords, not just first 8.
+    // Gmail query has a length limit so we use the most important terms.
+    const queryKeywords = ['invoice', 'receipt', 'statement', 'bill', 'payment', 'quote', 'contract', 'insurance', 'renewal', 'purchase order'];
+    const query = `has:attachment (${queryKeywords.join(' OR ')}) after:${afterDate}`;
 
     // List matching messages
     const listRes = await gmailGet(

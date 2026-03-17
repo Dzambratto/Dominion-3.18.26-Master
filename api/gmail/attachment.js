@@ -53,10 +53,13 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'no_tokens' });
   }
 
+  let tokenRefreshed = false;
   if (Date.now() > tokens.expiry - 60000 && tokens.refresh_token) {
     const refreshed = await refreshAccessToken(tokens.refresh_token);
     if (!refreshed.error) {
       tokens.access_token = refreshed.access_token;
+      tokens.expiry = Date.now() + (refreshed.expires_in || 3600) * 1000;
+      tokenRefreshed = true;
     }
   }
 
@@ -74,6 +77,15 @@ export default async function handler(req, res) {
     const data = await attachRes.json();
     // Gmail returns base64url-encoded data; convert to standard base64
     const base64 = (data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+
+    // FIX (Claude audit): Persist refreshed token back to cookie so next request doesn't re-refresh
+    if (tokenRefreshed) {
+      const cookieKey = `gmail_tokens_${(userId || 'anon').replace(/[^a-zA-Z0-9]/g, '_')}`.slice(0, 64);
+      const encoded = Buffer.from(JSON.stringify(tokens)).toString('base64');
+      res.setHeader('Set-Cookie', [
+        `${cookieKey}=${encoded}; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 24 * 60 * 60}; Path=/`,
+      ]);
+    }
 
     return res.status(200).json({ data: base64, size: data.size });
   } catch (err) {

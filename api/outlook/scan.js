@@ -97,40 +97,46 @@ export default async function handler(req, res) {
     }
 
     const messages = msgsData.value || [];
-    const financialMessages = [];
 
-    for (const msg of messages) {
-      if (!looksFinancial(msg.subject, msg.bodyPreview)) continue;
+    // FIX (Claude audit): Use Promise.all for parallel attachment fetching instead of sequential
+    // await-in-loop. This avoids slow sequential calls and reduces latency significantly.
+    const financialMsgs = messages.filter(msg => looksFinancial(msg.subject, msg.bodyPreview));
 
-      // Get attachment list for this message
-      const attRes = await fetch(
-        `https://graph.microsoft.com/v1.0/me/messages/${msg.id}/attachments?$select=id,name,contentType,size`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      const attData = await attRes.json();
-      const attachments = (attData.value || []).filter(a => {
-        const ct = (a.contentType || '').toLowerCase();
-        const name = (a.name || '').toLowerCase();
-        return (
-          ct.includes('pdf') ||
-          ct.includes('image/') ||
-          name.endsWith('.pdf') ||
-          name.endsWith('.png') ||
-          name.endsWith('.jpg') ||
-          name.endsWith('.jpeg')
-        );
-      });
+    const results = await Promise.all(
+      financialMsgs.map(async (msg) => {
+        try {
+          const attRes = await fetch(
+            `https://graph.microsoft.com/v1.0/me/messages/${msg.id}/attachments?$select=id,name,contentType,size`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          const attData = await attRes.json();
+          const attachments = (attData.value || []).filter(a => {
+            const ct = (a.contentType || '').toLowerCase();
+            const name = (a.name || '').toLowerCase();
+            return (
+              ct.includes('pdf') ||
+              ct.includes('image/') ||
+              name.endsWith('.pdf') ||
+              name.endsWith('.png') ||
+              name.endsWith('.jpg') ||
+              name.endsWith('.jpeg')
+            );
+          });
+          if (attachments.length === 0) return null;
+          return {
+            messageId: msg.id,
+            subject: msg.subject,
+            from: msg.from?.emailAddress?.address || '',
+            date: msg.receivedDateTime,
+            attachments: attachments.map(a => ({ id: a.id, name: a.name, contentType: a.contentType })),
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
 
-      if (attachments.length > 0) {
-        financialMessages.push({
-          messageId: msg.id,
-          subject: msg.subject,
-          from: msg.from?.emailAddress?.address || '',
-          date: msg.receivedDateTime,
-          attachments: attachments.map(a => ({ id: a.id, name: a.name, contentType: a.contentType })),
-        });
-      }
-    }
+    const financialMessages = results.filter(Boolean);
 
     return res.status(200).json({
       scanned: messages.length,

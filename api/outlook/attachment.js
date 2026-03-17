@@ -3,6 +3,9 @@
  *
  * Downloads a specific Outlook message attachment via Microsoft Graph API.
  * Returns the attachment as base64 for AI extraction.
+ *
+ * FIX (Claude audit): Added token refresh logic with persistence back to cookie.
+ * Previously, expired tokens were used as-is causing silent failures.
  */
 
 function getTokensFromCookie(cookies, userId) {
@@ -17,6 +20,21 @@ function getTokensFromCookie(cookies, userId) {
   }
 }
 
+async function refreshAccessToken(refreshToken, clientId, clientSecret, tenantId) {
+  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: 'https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadBasic offline_access',
+    }),
+  });
+  return res.json();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -27,9 +45,25 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'userId, messageId, and attachmentId are required' });
   }
 
-  const tokenData = getTokensFromCookie(req.headers.cookie, userId);
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+
+  let tokenData = getTokensFromCookie(req.headers.cookie, userId);
   if (!tokenData) {
     return res.status(401).json({ error: 'not_connected' });
+  }
+
+  // FIX (Claude audit): Refresh expired token and persist back to cookie
+  let tokenRefreshed = false;
+  if (Date.now() >= (tokenData.expiry || 0) - 60000 && tokenData.refresh_token && clientId && clientSecret) {
+    const refreshed = await refreshAccessToken(tokenData.refresh_token, clientId, clientSecret, tenantId);
+    if (refreshed.access_token) {
+      tokenData.access_token = refreshed.access_token;
+      if (refreshed.refresh_token) tokenData.refresh_token = refreshed.refresh_token;
+      tokenData.expiry = Date.now() + (refreshed.expires_in || 3600) * 1000;
+      tokenRefreshed = true;
+    }
   }
 
   try {
@@ -41,6 +75,15 @@ export default async function handler(req, res) {
 
     if (att.error) {
       return res.status(400).json({ error: att.error.code, message: att.error.message });
+    }
+
+    // Persist refreshed token back to cookie
+    if (tokenRefreshed) {
+      const cookieKey = `ms_tokens_${(userId || 'anon').replace(/[^a-zA-Z0-9]/g, '_')}`.slice(0, 64);
+      const encoded = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+      res.setHeader('Set-Cookie', [
+        `${cookieKey}=${encoded}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+      ]);
     }
 
     // contentBytes is already base64 in Graph API response
