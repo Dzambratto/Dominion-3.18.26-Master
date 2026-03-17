@@ -9,6 +9,7 @@
  *   days    — how many days back to scan (default: 90)
  *   maxResults — max emails to process (default: 50)
  */
+import { requireAuth } from '../_middleware.js';
 
 const FINANCIAL_KEYWORDS = [
   'invoice', 'receipt', 'statement', 'bill', 'payment', 'quote', 'estimate',
@@ -72,18 +73,17 @@ function isFinancialEmail(subject, snippet) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', process.env.VITE_APP_URL || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Auth-Token');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const userId = req.query.userId || '';
+  // Verify the caller is authenticated and owns this userId
+  const authUser = await requireAuth(req, res);
+  if (!authUser) return; // requireAuth already sent 401/403
+  const userId = authUser.id;
   const days = parseInt(req.query.days || '90', 10);
   const maxResults = Math.min(parseInt(req.query.maxResults || '50', 10), 100);
-
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required' });
-  }
 
   // Get tokens from cookie
   let tokens = getTokensFromCookie(req, userId);

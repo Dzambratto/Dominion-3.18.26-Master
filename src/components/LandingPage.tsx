@@ -709,6 +709,7 @@ function PricingSection({ onEnterApp }: { onEnterApp: () => void }) {
   const plans = [
     {
       name: 'Starter',
+      planId: 'starter',
       price: 149,
       description: 'For small businesses processing up to 50 invoices per month.',
       features: [
@@ -724,6 +725,7 @@ function PricingSection({ onEnterApp }: { onEnterApp: () => void }) {
     },
     {
       name: 'Operator',
+      planId: 'operator',
       price: 349,
       description: 'For growing businesses that need full AP automation and insurance tracking.',
       features: [
@@ -741,6 +743,7 @@ function PricingSection({ onEnterApp }: { onEnterApp: () => void }) {
     },
     {
       name: 'Controller',
+      planId: 'controller',
       price: 749,
       description: 'For established businesses that need the full platform with order automation.',
       features: [
@@ -807,7 +810,7 @@ function PricingSection({ onEnterApp }: { onEnterApp: () => void }) {
               </div>
 
               <button
-                onClick={onEnterApp}
+                onClick={() => startCheckout((plan as any).planId)}
                 className={`w-full py-3 rounded-xl font-semibold text-sm transition-all ${
                   plan.highlight
                     ? 'bg-blue-500 hover:bg-blue-400 text-white shadow-lg shadow-blue-500/25'

@@ -9,6 +9,8 @@
     { "source": "/api/extract", "destination": "/api/extract.js" },
     { "source": "/api/outlook/scan", "destination": "/api/outlook/scan.js" },
     { "source": "/api/outlook/attachment", "destination": "/api/outlook/attachment.js" },
+    { "source": "/api/stripe/checkout", "destination": "/api/stripe/checkout.js" },
+    { "source": "/api/stripe/webhook", "destination": "/api/stripe/webhook.js" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

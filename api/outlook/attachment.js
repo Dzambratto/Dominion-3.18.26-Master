@@ -7,6 +7,7 @@
  * FIX (Claude audit): Added token refresh logic with persistence back to cookie.
  * Previously, expired tokens were used as-is causing silent failures.
  */
+import { requireAuth } from '../_middleware.js';
 
 function getTokensFromCookie(cookies, userId) {
   const cookieKey = `ms_tokens_${(userId || 'anon').replace(/[^a-zA-Z0-9]/g, '_')}`.slice(0, 64);
@@ -36,13 +37,19 @@ async function refreshAccessToken(refreshToken, clientId, clientSecret, tenantId
 }
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', process.env.VITE_APP_URL || '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Auth-Token');
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { userId, messageId, attachmentId } = req.query;
-  if (!userId || !messageId || !attachmentId) {
-    return res.status(400).json({ error: 'userId, messageId, and attachmentId are required' });
+  const authUser = await requireAuth(req, res);
+  if (!authUser) return;
+  const userId = authUser.id;
+  const { messageId, attachmentId } = req.query;
+  if (!messageId || !attachmentId) {
+    return res.status(400).json({ error: 'messageId and attachmentId are required' });
   }
 
   const clientId = process.env.MICROSOFT_CLIENT_ID;

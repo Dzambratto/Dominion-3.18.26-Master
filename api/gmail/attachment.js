@@ -8,6 +8,7 @@
  *   messageId    — Gmail message ID
  *   attachmentId — Gmail attachment ID
  */
+import { requireAuth } from '../_middleware.js';
 
 function getTokensFromCookie(req, userId) {
   const cookieHeader = req.headers.cookie || '';
@@ -39,13 +40,17 @@ async function refreshAccessToken(refreshToken) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', process.env.VITE_APP_URL || '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Auth-Token');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { userId, messageId, attachmentId } = req.query;
+  const authUser = await requireAuth(req, res);
+  if (!authUser) return;
+  const { messageId, attachmentId } = req.query;
+  const userId = authUser.id;
 
-  if (!userId || !messageId || !attachmentId) {
-    return res.status(400).json({ error: 'userId, messageId, and attachmentId are required' });
+  if (!messageId || !attachmentId) {
+    return res.status(400).json({ error: 'messageId and attachmentId are required' });
   }
 
   let tokens = getTokensFromCookie(req, userId);

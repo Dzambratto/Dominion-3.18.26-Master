@@ -5,6 +5,7 @@
  * Finds emails with PDF/image attachments that look like financial documents.
  * Returns a list of { messageId, subject, from, date, attachments[] } for extraction.
  */
+import { requireAuth } from '../_middleware.js';
 
 const FINANCIAL_KEYWORDS = [
   'invoice', 'bill', 'receipt', 'statement', 'payment', 'purchase order',
@@ -45,14 +46,16 @@ async function refreshAccessToken(refreshToken, clientId, clientSecret, tenantId
 }
 
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', process.env.VITE_APP_URL || '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Auth-Token');
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { userId } = req.query;
-  if (!userId) {
-    return res.status(400).json({ error: 'userId required' });
-  }
+  const authUser = await requireAuth(req, res);
+  if (!authUser) return;
+  const userId = authUser.id;
 
   const clientId = process.env.MICROSOFT_CLIENT_ID;
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
