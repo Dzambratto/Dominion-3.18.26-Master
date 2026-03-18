@@ -9,8 +9,22 @@
  */
 
 import type { Invoice, InboxAlert } from './types';
+import { supabase } from './supabase';
 
 const APP_URL = (import.meta.env.VITE_APP_URL as string) || window.location.origin;
+
+/** Get the current Supabase access token for API auth */
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      return { Authorization: `Bearer ${session.access_token}` };
+    }
+  } catch {
+    // Fall through — API will use cookie or return 401
+  }
+  return {};
+}
 
 export interface ScanResult {
   invoices: Invoice[];
@@ -182,10 +196,12 @@ export async function runGmailScan(
     error?: string;
     message?: string;
   };
+  const authHeaders = await getAuthHeaders();
+
   try {
     const scanRes = await fetchWithTimeout(
       `${APP_URL}/api/gmail/scan?userId=${encodeURIComponent(userId)}&days=90&maxResults=30`,
-      { credentials: 'include' },
+      { credentials: 'include', headers: authHeaders },
       20000
     );
     scanData = await scanRes.json();
@@ -223,7 +239,7 @@ export async function runGmailScan(
         // Download attachment
         const attachRes = await fetchWithTimeout(
           `${APP_URL}/api/gmail/attachment?userId=${encodeURIComponent(userId)}&messageId=${email.messageId}&attachmentId=${attachment.attachmentId}`,
-          { credentials: 'include' },
+          { credentials: 'include', headers: authHeaders },
           15000
         );
         if (!attachRes.ok) {
@@ -237,7 +253,7 @@ export async function runGmailScan(
           `${APP_URL}/api/extract`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
             body: JSON.stringify({
               data: attachData.data,
               mimeType: attachment.mimeType,
