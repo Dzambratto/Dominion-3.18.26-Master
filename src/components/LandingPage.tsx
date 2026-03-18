@@ -755,7 +755,7 @@ function FeaturesSection() {
             Built for how real businesses operate
           </h2>
           <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-            Every feature in Dominion was designed around one question: what does a great financial controller actually do all day?
+            Every feature in Dominion was built around one question: what does it actually take to keep a business's finances under control?
           </p>
         </div>
 
@@ -796,7 +796,7 @@ function AboutSection() {
             </h2>
             <div className="space-y-5 text-slate-400 text-base leading-relaxed">
               <p>
-                A seasoned financial controller typically costs between $70,000 and $100,000 per year. For most small and mid-sized businesses, that level of oversight simply isn’t accessible — yet the work they do is critical.
+                Most businesses don't have the time or bandwidth to catch every invoice discrepancy, monitor every vendor contract, and track every operational pattern. The details that matter most are often the ones that go unnoticed.
               </p>
               <p className="space-y-1">
                 Invoices slip through unnoticed. Contracts drift out of compliance. Insurance renewals go unreviewed. Vendors quietly raise prices.
