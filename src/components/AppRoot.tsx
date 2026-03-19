@@ -151,8 +151,14 @@ function AppInner() {
         height: '100vh', background: '#0A0F1E',
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '32px', fontWeight: 800, color: '#fff', letterSpacing: '-1px', marginBottom: '12px' }}>
-            DOMINION
+          {/* Logo — matches landing page navbar */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '20px' }}>
+            <img
+              src="/dominion-logo-transparent.png"
+              alt="Dominion"
+              style={{ width: 44, height: 44, objectFit: 'contain' }}
+            />
+            <span style={{ fontSize: '26px', fontWeight: 700, color: '#fff', letterSpacing: '-0.5px' }}>Dominion</span>
           </div>
           <style dangerouslySetInnerHTML={{ __html: LOADING_DOTS_CSS }} />
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
