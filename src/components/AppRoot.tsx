@@ -6,6 +6,25 @@ import { AuthScreen } from '@/components/AuthScreen';
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 
+const LOADING_DOTS_CSS = `
+  @keyframes dominionDotBounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+    40% { transform: translateY(-7px); opacity: 1; }
+  }
+  .d-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3B82F6;
+    margin: 0 3px;
+    animation: dominionDotBounce 1.3s ease-in-out infinite;
+  }
+  .d-dot:nth-child(1) { animation-delay: 0s; }
+  .d-dot:nth-child(2) { animation-delay: 0.22s; }
+  .d-dot:nth-child(3) { animation-delay: 0.44s; }
+`;
+
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   google_denied: 'Google sign-in was cancelled.',
   microsoft_denied: 'Microsoft sign-in was cancelled.',
@@ -135,7 +154,13 @@ function AppInner() {
           <div style={{ fontSize: '32px', fontWeight: 800, color: '#fff', letterSpacing: '-1px', marginBottom: '12px' }}>
             DOMINION
           </div>
-          <div style={{ color: '#3B82F6', fontSize: '13px' }}>Loading…</div>
+          <style dangerouslySetInnerHTML={{ __html: LOADING_DOTS_CSS }} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
+            <span style={{ color: '#3B82F6', fontSize: '13px', marginRight: '8px' }}>Loading</span>
+            <span className="d-dot" />
+            <span className="d-dot" />
+            <span className="d-dot" />
+          </div>
         </div>
       </div>
     );
